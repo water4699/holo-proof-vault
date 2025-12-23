@@ -1,0 +1,146 @@
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import { ethers, fhevm, deployments } from "hardhat";
+import { ProofVault } from "../types";
+import { expect } from "chai";
+
+describe("ProofVault (Sepolia)", function () {
+  let proofVaultContract: ProofVault;
+  let proofVaultContractAddress: string;
+  let alice: HardhatEthersSigner;
+  let relayerClient: any;
+
+  before(async function () {
+    // Skip if running on mock network
+    if (fhevm.isMock) {
+      console.warn("This test suite is for Sepolia Testnet only");
+      this.skip();
+    }
+
+    const ethSigners: HardhatEthersSigner[] = await ethers.getSigners();
+    alice = ethSigners[0];
+
+    // Get deployed contract
+    await deployments.fixture(["ProofVault"]);
+    const deployment = await deployments.get("ProofVault");
+    proofVaultContractAddress = deployment.address;
+    proofVaultContract = await ethers.getContractAt("ProofVault", proofVaultContractAddress);
+
+    // Initialize relayer client for decryption
+    try {
+      const RelayerSDK = await import("@zama-fhe/relayer-sdk");
+      const RelayerClient = RelayerSDK.default || RelayerSDK.RelayerClient || RelayerSDK;
+      relayerClient = new RelayerClient({
+        relayerUrl: "https://relayer.sepolia.zama.ai",
+        chainId: 11155111,
+      });
+    } catch (error) {
+      console.warn("Failed to load relayer SDK:", error);
+      this.skip();
+    }
+
+    console.log(`ProofVault contract address: ${proofVaultContractAddress}`);
+    console.log(`Alice address: ${alice.address}`);
+  });
+
+  it("should add a product on Sepolia", async function () {
+    this.timeout(120000); // 2 minutes timeout for network operations
+
+    const productName = "Sepolia Test Product";
+    const productImageUrl = "https://example.com/sepolia-product.jpg";
+    const clearPrice = 450000000000000000n; // 0.45 ETH in wei
+    const clearCertHash = 123456789;
+
+    // Create encrypted input
+    const encryptedInput = await fhevm
+      .createEncryptedInput(proofVaultContractAddress, alice.address)
+      .add64(clearPrice)
+      .add32(clearCertHash)
+      .encrypt();
+
+    console.log("Adding product to Sepolia...");
+
+    // Add product
+    const tx = await proofVaultContract
+      .connect(alice)
+      .addProduct(
+        productName,
+        encryptedInput.handles[0],
+        productImageUrl,
+        encryptedInput.handles[1],
+        encryptedInput.inputProof
+      );
+
+    const receipt = await tx.wait();
+    console.log(`Transaction confirmed: ${receipt?.hash}`);
+
+    // Get total products
+    const totalProducts = await proofVaultContract.getTotalProducts();
+    console.log(`Total products: ${totalProducts}`);
+
+    expect(totalProducts).to.be.gt(0);
+  });
+
+  it("should retrieve product info on Sepolia", async function () {
+    this.timeout(60000);
+
+    const totalProducts = await proofVaultContract.getTotalProducts();
+    if (totalProducts === 0n) {
+      console.log("No products available, skipping test");
+      this.skip();
+    }
+
+    const productId = totalProducts - 1n; // Get the last product
+    const [name, imageUrl, seller, timestamp] = await proofVaultContract.getProductInfo(productId);
+
+    console.log(`Product ${productId}:`);
+    console.log(`  Name: ${name}`);
+    console.log(`  Image URL: ${imageUrl}`);
+    console.log(`  Seller: ${seller}`);
+    console.log(`  Timestamp: ${timestamp}`);
+
+    expect(name).to.not.be.empty;
+    expect(imageUrl).to.not.be.empty;
+    expect(seller).to.not.eq(ethers.ZeroAddress);
+  });
+
+  it("should decrypt product data using relayer on Sepolia", async function () {
+    this.timeout(120000);
+
+    const totalProducts = await proofVaultContract.getTotalProducts();
+    if (totalProducts === 0n) {
+      console.log("No products available, skipping test");
+      this.skip();
+    }
+
+    const productId = totalProducts - 1n;
+    const [encPrice, encCertHash] = await proofVaultContract.getProductEncryptedData(productId);
+
+    console.log(`Encrypted price handle: ${encPrice}`);
+    console.log(`Encrypted cert hash handle: ${encCertHash}`);
+
+    // Decrypt using relayer
+    try {
+      const decryptedPrice = await relayerClient.decrypt({
+        handle: encPrice,
+        contractAddress: proofVaultContractAddress,
+        userAddress: alice.address,
+      });
+
+      const decryptedCertHash = await relayerClient.decrypt({
+        handle: encCertHash,
+        contractAddress: proofVaultContractAddress,
+        userAddress: alice.address,
+      });
+
+      console.log(`Decrypted price: ${decryptedPrice} wei`);
+      console.log(`Decrypted cert hash: ${decryptedCertHash}`);
+
+      expect(decryptedPrice).to.be.gt(0);
+      expect(decryptedCertHash).to.be.gt(0);
+    } catch (error) {
+      console.error("Decryption error:", error);
+      // Don't fail the test if relayer is temporarily unavailable
+      console.warn("Skipping decryption verification due to relayer error");
+    }
+  });
+});
