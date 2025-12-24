@@ -10,7 +10,6 @@ import { useAccount, useSignMessage } from "wagmi";
 import { toast } from "sonner";
 import { useProofVault } from "@/hooks/useProofVault";
 import { useProducts } from "@/contexts/ProductContext";
-import { parseEther } from "viem";
 import { useFhevm } from "@/fhevm/useFhevm";
 import { usePublicClient } from "wagmi";
 

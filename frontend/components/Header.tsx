@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { Button } from "@/components/ui/button";
-import { Wallet, Shield, Menu, X, ChevronDown } from "lucide-react";
+import { Wallet, Shield, Menu, X } from "lucide-react";
 
 export const Header = () => {
   const { address, isConnected } = useAccount();

@@ -1,5 +1,16 @@
 // Frontend performance optimization utilities
 
+// Extend Performance interface to include memory property (available in browsers)
+declare global {
+  interface Performance {
+    memory?: {
+      usedJSHeapSize: number;
+      totalJSHeapSize: number;
+      jsHeapSizeLimit: number;
+    };
+  }
+}
+
 export interface PerformanceMetrics {
   renderTime: number;
   componentCount: number;
@@ -19,7 +30,7 @@ class PerformanceMonitor {
     const metric: PerformanceMetrics = {
       renderTime,
       componentCount,
-      memoryUsage: (performance as any).memory?.usedJSHeapSize,
+      memoryUsage: performance.memory?.usedJSHeapSize,
     };
 
     this.metrics.push(metric);
@@ -57,7 +68,7 @@ export function usePerformanceMonitor(componentName: string) {
 }
 
 // Memoization helper for expensive computations
-export function memoize<T extends (...args: any[]) => any>(fn: T): T {
+export function memoize<T extends (...args: unknown[]) => unknown>(fn: T): T {
   const cache = new Map();
   
   return ((...args: Parameters<T>) => {
